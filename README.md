@@ -12,8 +12,6 @@
 
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:00ff00,100:009900&height=210&section=header&text=CYBER%20RNG%20CORE&fontSize=70&fontAlignY=35&animation=fadeIn&desc=Decentralized%20Backend%20Infrastructure&descAlignY=60" />
-
 ### The Neural Backbone of the CyberRNG Network
 
 <p>
@@ -72,11 +70,11 @@ CyberRNG uses a hybrid **Web2 + Web3** architecture:
 
 ```mermaid
 flowchart TD
-    A[Player signs message (EIP-191)] --> B[Backend verifies signature]
-    B --> C[Backend constructs meta-transaction]
-    C --> D[Admin Wallet executes transaction on Polygon Amoy]
-    D --> E[SQLite stores mission + leaderboard state]
-    E --> F[Client receives updated game state]
+    A["📝 Player signs message<br/>(EIP-191)"] --> B["🔍 Signature & Intent Verification"]
+    B --> C["⚙️ Construct Meta-Transaction"]
+    C --> D["🚀 Admin Wallet Executes TX<br/>Polygon Amoy"]
+    D --> E["🗄 SQLite: Missions + Leaderboard"]
+    E --> F["📡 Client Receives Updated State"]
 ```
 
 ---
