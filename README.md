@@ -26,9 +26,9 @@
 </p>
 
 <p>
-  <img src="https://img.shields.io/github/last-commit/yourusername/cyber-rng-core?color=green&style=flat-square" />
-  <img src="https://img.shields.io/github/languages/top/yourusername/cyber-rng-core?style=flat-square" />
-  <img src="https://img.shields.io/github/repo-size/yourusername/cyber-rng-core?style=flat-square" />
+  <img src="https://img.shields.io/github/last-commit/rafidef/cyber-rng?color=green&style=flat-square" />
+  <img src="https://img.shields.io/github/languages/top/rafidef/cyber-rng?style=flat-square" />
+  <img src="https://img.shields.io/github/repo-size/rafidef/cyber-rng?style=flat-square" />
 </p>
 
 </div>
@@ -114,7 +114,7 @@ Tracks wealth & mining performance across all players.
 
 ### **1. Clone the Repository**
 ```bash
-git clone https://github.com/yourusername/cyber-rng-core.git
+git clone https://github.com/rafidef/cyber-rng.git
 cd cyber-rng-core
 ```
 
