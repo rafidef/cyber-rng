@@ -2,6 +2,7 @@ import express from 'express';
 import { ethers } from 'ethers';
 import * as dotenv from 'dotenv';
 import cors from 'cors';
+import * as fs from 'fs'; // Import File System
 
 dotenv.config();
 
@@ -14,6 +15,38 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS!;
 const RPC_URL = process.env.POLYGON_AMOY_RPC;
 
+// --- SIMPLE DATABASE SYSTEM ---
+const DB_FILE = 'users.json';
+let knownUsers: Set<string> = new Set();
+
+// Load database saat server start
+if (fs.existsSync(DB_FILE)) {
+    try {
+        const data = fs.readFileSync(DB_FILE, 'utf-8');
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed)) {
+            parsed.forEach((u: string) => knownUsers.add(u));
+            console.log(`📂 Database Loaded: ${knownUsers.size} known hackers.`);
+        }
+    } catch (e) { console.error("Error loading DB, starting fresh."); }
+}
+
+// Fungsi untuk mencatat user baru
+function registerUser(address: string) {
+    const normalized = address.toLowerCase(); // Simpan dalam lowercase agar konsisten
+    // Jika user belum ada di list, simpan dan update file
+    // Kita simpan address asli (bukan normalized) di set untuk display, tapi cek duplikasi
+    
+    let exists = false;
+    knownUsers.forEach(u => { if(u.toLowerCase() === normalized) exists = true; });
+
+    if (!exists) {
+        knownUsers.add(address);
+        fs.writeFileSync(DB_FILE, JSON.stringify([...knownUsers]));
+        console.log(`📝 New User Registered: ${address}`);
+    }
+}
+
 // --- METADATA DATABASE ---
 const ITEM_DB: Record<string, { name: string, type: string, stats: string }> = {
     "1": { name: "Lost Sector", type: "ARTIFACT", stats: "10 $HASH" },
@@ -21,20 +54,15 @@ const ITEM_DB: Record<string, { name: string, type: string, stats: string }> = {
     "3": { name: "Encrypted Data", type: "ARTIFACT", stats: "200 $HASH" },
     "4": { name: "Root Access", type: "ARTIFACT", stats: "1000 $HASH" },
     "5": { name: "Genesis Block", type: "ARTIFACT", stats: "5000 $HASH" },
-    
     "99": { name: "Corrupted Core", type: "SECRET", stats: "LIMIT BREAK MATERIAL" },
-    
     "101": { name: "Integrated Chip", type: "GPU", stats: "Speed -1s" },
     "102": { name: "Mining Rig v1", type: "GPU", stats: "Speed -2s" },
     "103": { name: "Quantum Core", type: "GPU", stats: "Speed -3s" },
-
     "201": { name: "Free Proxy", type: "VPN", stats: "Luck +500" },
     "202": { name: "Private Node", type: "VPN", stats: "Luck +2000" },
     "203": { name: "Military Uplink", type: "VPN", stats: "Luck +5000" },
-
     "301": { name: "Script Kiddie", type: "SOFT", stats: "Luck +1000" },
     "302": { name: "Black Hat Tool", type: "SOFT", stats: "Luck +3000" },
-    
     "401": { name: "Overclock Chip", type: "MAT", stats: "Enchant Material" }
 };
 
@@ -67,8 +95,41 @@ const getMetadata = (id: string) => ITEM_DB[id] || { name: "Unknown", type: "???
 
 // --- ROUTES ---
 
+// 1. LEADERBOARD (NEW)
+app.get('/leaderboard', async (req, res) => {
+    try {
+        const users = [...knownUsers];
+        const leaderboard = [];
+
+        // Scan saldo setiap user
+        for (const addr of users) {
+            let balanceVal = 0;
+            let balanceStr = "0.0";
+            
+            if (tokenContract) {
+                try {
+                    const raw = await tokenContract.balanceOf(addr);
+                    balanceVal = Number(ethers.formatEther(raw));
+                    balanceStr = balanceVal.toFixed(1);
+                } catch(e) {}
+            }
+            leaderboard.push({ address: addr, balance: balanceStr, raw: balanceVal });
+        }
+
+        // Sort: Tertinggi ke Terendah
+        leaderboard.sort((a, b) => b.raw - a.raw);
+
+        // Ambil Top 10
+        res.json({ top10: leaderboard.slice(0, 10) });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// 2. PROFILE
 app.get('/profile/:address', async (req, res) => {
     try {
+        registerUser(req.params.address); // Register saat cek profile
         const stats = await gameContract.getPlayerStats(req.params.address);
         let balance = "0.0";
         if (tokenContract) {
@@ -78,7 +139,6 @@ app.get('/profile/:address', async (req, res) => {
         const gpuId = stats[2].toString();
         const vpnId = stats[3].toString();
         
-        // Get Equipment Levels
         let gpuName = "None", vpnName = "None";
         if (gpuId !== "0") {
             const lvl = await gameContract.getItemLevel(req.params.address, gpuId);
@@ -98,14 +158,15 @@ app.get('/profile/:address', async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// 3. MINE
 app.post('/mine', async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
+        registerUser(userAddress); // Register
+        
         if (ethers.verifyMessage("MINT_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
         
-        const tx = await gameContract.mineArtifact(userAddress, { 
-            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
-        });
+        const tx = await gameContract.mineArtifact(userAddress, { gasLimit: 500000 }); // Gas Fix
         const receipt = await tx.wait();
         
         let result = null;
@@ -125,15 +186,16 @@ app.post('/mine', async (req, res) => {
     }
 });
 
+// 4. WORKSHOP
 app.post('/workshop/enchant', async (req, res) => {
     try {
         const { userAddress, signature, targetId, materialId } = req.body;
+        registerUser(userAddress);
+
         if (ethers.verifyMessage("ENCHANT_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
 
         console.log(`⚡ Enchanting Item #${targetId} for ${userAddress}`);
-        const tx = await gameContract.enchantItem(userAddress, targetId, materialId, { 
-            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
-        });
+        const tx = await gameContract.enchantItem(userAddress, targetId, materialId, { gasLimit: 500000 });
         const receipt = await tx.wait();
         
         let success = false, newLevel = 0;
@@ -150,43 +212,45 @@ app.post('/workshop/enchant', async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// 5. EQUIP
 app.post('/equip', async (req, res) => {
     try {
         const { userAddress, signature, itemId } = req.body;
+        registerUser(userAddress);
         if (ethers.verifyMessage("EQUIP_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
-        const tx = await gameContract.equipItem(userAddress, itemId, { 
-            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
-        });
+        const tx = await gameContract.equipItem(userAddress, itemId, { gasLimit: 200000 });
         await tx.wait();
         res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// 6. SHOP BUFF
 app.post('/shop/software', async (req, res) => {
     try {
         const { userAddress, signature, itemId } = req.body;
+        registerUser(userAddress);
         if (ethers.verifyMessage("BUY_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
-        const tx = await gameContract.buySoftware(userAddress, itemId, { 
-        gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
-        });
+        const tx = await gameContract.buySoftware(userAddress, itemId, { gasLimit: 200000 });
         await tx.wait();
         res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// 7. SALVAGE
 app.post('/salvage', async (req, res) => {
     try {
         const { userAddress, signature, tokenId, amount } = req.body;
+        registerUser(userAddress);
         if (ethers.verifyMessage("SALVAGE_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
-        const tx = await gameContract.salvageArtifact(userAddress, tokenId, amount, { 
-            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
-        });
+        const tx = await gameContract.salvageArtifact(userAddress, tokenId, amount, { gasLimit: 200000 });
         await tx.wait();
         res.json({ success: true, message: "Salvage Complete" });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// 8. INVENTORY
 app.get('/inventory/:address', async (req, res) => {
+    registerUser(req.params.address); // Register saat cek inventory
     const ids = [1,2,3,4,5, 99, 101,102,103, 201,202,203, 401];
     const accounts = Array(ids.length).fill(req.params.address);
     try {
@@ -200,4 +264,4 @@ app.get('/inventory/:address', async (req, res) => {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(PORT, () => console.log(`🚀 CyberRNG v5.0 (5s CD) running on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 CyberRNG v5.1 (Leaderboard) running on ${PORT}`));
