@@ -2,7 +2,7 @@ import express from 'express';
 import { ethers } from 'ethers';
 import * as dotenv from 'dotenv';
 import cors from 'cors';
-import db from './database'; // Pastikan file src/database.ts sudah ada
+import db from './database'; // Ensure you have src/database.ts
 
 dotenv.config();
 
@@ -15,9 +15,9 @@ const PRIVATE_KEY = process.env.PRIVATE_KEY!;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS!;
 const RPC_URL = process.env.POLYGON_AMOY_RPC;
 
-// --- MASTER ITEM DATABASE ---
+// --- MASTER ITEM DATABASE (v8.1 BALANCED STATS) ---
 const ITEM_DB: Record<string, { name: string, type: string, stats: string, yield?: string }> = {
-    // Artifacts
+    // Artifacts (Junk/Money)
     "1": { name: "Corrupted File", type: "JUNK", stats: "10 $HASH" },
     "2": { name: "Glitched Log", type: "JUNK", stats: "25 $HASH" },
     "3": { name: "Encoded Fragment", type: "JUNK", stats: "50 $HASH" },
@@ -25,25 +25,25 @@ const ITEM_DB: Record<string, { name: string, type: string, stats: string, yield
     "5": { name: "VPN Log", type: "RARE", stats: "250 $HASH" },
     "6": { name: "Root Key", type: "EPIC", stats: "1000 $HASH" },
     "7": { name: "Zero Day", type: "LEGEND", stats: "5000 $HASH" },
-    "8": { name: "Genesis Hash", type: "MYTHIC", stats: "25k $HASH" },
+    "8": { name: "Genesis Hash", type: "MYTHIC", stats: "25k $HASH", yield: "1.0" }, // Nerfed yield
 
-    // GPU (Speed & Staking Yield)
-    "101": { name: "Integrated Chip", type: "GPU", stats: "Spd -2s", yield: "0.1" },
-    "102": { name: "Overclocked APU", type: "GPU", stats: "Spd -5s", yield: "0.5" },
-    "103": { name: "Mining Rig v1", type: "GPU", stats: "Spd -10s", yield: "2.0" },
-    "104": { name: "Quantum Core", type: "GPU", stats: "Spd -15s", yield: "10.0" },
+    // GPU (Speed & Staking Yield - NERFED)
+    "101": { name: "Integrated Chip", type: "GPU", stats: "Spd -2s", yield: "0.01" },
+    "102": { name: "Overclocked APU", type: "GPU", stats: "Spd -5s", yield: "0.05" },
+    "103": { name: "Mining Rig v1", type: "GPU", stats: "Spd -10s", yield: "0.2" },
+    "104": { name: "Quantum Core", type: "GPU", stats: "Spd -15s", yield: "1.0" },
 
-    // VPN (Luck & Staking Yield)
-    "201": { name: "Public Proxy", type: "VPN", stats: "Luck +100", yield: "0.05" },
-    "202": { name: "Tor Node", type: "VPN", stats: "Luck +500", yield: "0.2" },
-    "203": { name: "Private Tunnel", type: "VPN", stats: "Luck +1500", yield: "0.8" },
-    "204": { name: "Military Uplink", type: "VPN", stats: "Luck +3000", yield: "4.0" },
-    "205": { name: "AI Neural Net", type: "VPN", stats: "Luck +8000", yield: "20.0" },
+    // VPN (Luck & Staking Yield - NERFED)
+    "201": { name: "Public Proxy", type: "VPN", stats: "Luck +100", yield: "0.01" },
+    "202": { name: "Tor Node", type: "VPN", stats: "Luck +500", yield: "0.05" },
+    "203": { name: "Private Tunnel", type: "VPN", stats: "Luck +1500", yield: "0.2" },
+    "204": { name: "Military Uplink", type: "VPN", stats: "Luck +3000", yield: "0.8" },
+    "205": { name: "AI Neural Net", type: "VPN", stats: "Luck +8000", yield: "2.5" },
 
-    // Software
-    "301": { name: "Script Kiddie", type: "SOFT", stats: "Luck +1k" },
-    "302": { name: "Black Hat Tool", type: "SOFT", stats: "Luck +5k" },
-    "303": { name: "State Sponsored", type: "SOFT", stats: "Luck +20k" },
+    // Software (Buffs - NERFED)
+    "301": { name: "Script Kiddie", type: "SOFT", stats: "Luck +300" },
+    "302": { name: "Black Hat Tool", type: "SOFT", stats: "Luck +1000" },
+    "303": { name: "State Sponsored", type: "SOFT", stats: "Luck +2500" },
 
     // Materials
     "401": { name: "Silicon Scrap", type: "MAT", stats: "Enhance 1-3" },
@@ -60,7 +60,7 @@ const GAME_ABI = [
     "function mineArtifact(address recipient) external",
     "function salvageArtifact(address user, uint256 tokenId, uint256 amount) external",
     "function equipItem(address user, uint256 itemId) external",
-    "function buySoftware(address user, uint256 itemId) external",
+    "function buyShopItem(address user, uint256 itemId) external",
     "function enchantItem(address user, uint256 targetItemId, uint256 materialId) external",
     "function useConsumable(address user, uint256 itemId) external",
     
@@ -102,9 +102,12 @@ gameContract.hashToken().then((addr: string) => {
 const getMeta = (id: string) => ITEM_DB[id] || { name: "Unknown", type: "???", stats: "?" };
 
 // --- DB HELPERS ---
+function normalize(addr: string) { return addr.toLowerCase(); }
+
 function upsertUser(addr: string, bal: string) {
+    const safeAddr = normalize(addr);
     db.run(`INSERT INTO users (address, hash_balance, last_seen) VALUES (?, ?, datetime('now'))
-            ON CONFLICT(address) DO UPDATE SET hash_balance=?, last_seen=datetime('now')`, [addr, bal, bal]);
+            ON CONFLICT(address) DO UPDATE SET hash_balance=?, last_seen=datetime('now')`, [safeAddr, bal, bal]);
 }
 
 // --- MISSION LOGIC ---
@@ -120,6 +123,7 @@ const MISSION_POOL = [
 ];
 
 function generateMissions(addr: string) {
+    const safeAddr = normalize(addr);
     const today = new Date().toISOString().split('T')[0];
     const shuffled = [...MISSION_POOL].sort(() => 0.5 - Math.random()).slice(0, 3); // Pick 3
     
@@ -133,13 +137,14 @@ function generateMissions(addr: string) {
             rewardVal = Math.floor(target * tpl.rewardMult!);
         }
         const key = `${tpl.type}:${target}:${rewardVal}`;
-        db.run(`INSERT OR IGNORE INTO missions (address, mission_key, target, date) VALUES (?, ?, ?, ?)`, [addr, key, target, today]);
+        db.run(`INSERT OR IGNORE INTO missions (address, mission_key, target, date) VALUES (?, ?, ?, ?)`, [safeAddr, key, target, today]);
     });
 }
 
 function trackMission(addr: string, type: string, val: number = 1) {
+    const safeAddr = normalize(addr);
     const today = new Date().toISOString().split('T')[0];
-    db.all(`SELECT * FROM missions WHERE address=? AND date=? AND claimed=0`, [addr, today], (e, rows) => {
+    db.all(`SELECT * FROM missions WHERE address=? AND date=? AND claimed=0`, [safeAddr, today], (e, rows) => {
         if(rows) rows.forEach((r:any) => {
             const [mType, mTarget] = r.mission_key.split(':');
             if (mType === type) {
@@ -152,37 +157,23 @@ function trackMission(addr: string, type: string, val: number = 1) {
 
 // --- ROUTES ---
 
-// 1. MINE (Optimized with staticCall)
+// 1. MINE
 app.post('/mine', async (req, res) => {
     try {
         const { userAddress, signature } = req.body;
-        
-        // Auth Check
-        if (ethers.verifyMessage("MINT_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) {
-            return res.status(401).json({ error: "Invalid Sig" });
-        }
+        if (ethers.verifyMessage("MINT_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Invalid Sig" });
 
-        // --- STATIC CALL SIMULATION ---
-        // Cek apakah akan gagal (revert) sebelum kirim TX asli
-        try {
-            await gameContract.mineArtifact.staticCall(userAddress);
-        } catch (simError: any) {
+        // Static Call Simulation
+        try { await gameContract.mineArtifact.staticCall(userAddress); } 
+        catch (simError: any) {
             const msg = simError.reason || simError.message || "";
-            if (msg.includes("Overheat") || msg.includes("System Overheat")) {
-                return res.status(429).json({ error: "System Overheat" }); // Clean Error
-            }
-            // Jika error lain, biarkan lanjut (mungkin masalah network sesaat)
-            console.log("Sim Warning:", msg);
+            if (msg.includes("Overheat") || msg.includes("System Overheat")) return res.status(429).json({ error: "System Overheat" });
         }
 
-        // Send Transaction
         const tx = await gameContract.mineArtifact(userAddress, { gasLimit: 500000 });
         const receipt = await tx.wait();
-        
-        // Track Mission
         trackMission(userAddress, "MINE_COUNT", 1);
 
-        // Parse Logs
         let result = null;
         for (const log of receipt.logs) {
             try {
@@ -190,74 +181,104 @@ app.post('/mine', async (req, res) => {
                 if (parsed && parsed.name === 'MiningResult') {
                     const id = Number(parsed.args[1]);
                     result = { ...getMeta(id.toString()), tokenId: id.toString(), isEquipment: parsed.args[3] };
-                    
-                    // Track Finds
                     if (result.isEquipment || id >= 100) trackMission(userAddress, "FIND_EQUIP", 1);
                 }
             } catch (e) {}
         }
         res.json({ success: true, txHash: tx.hash, data: result });
-
     } catch (e: any) { 
-        // Fallback Error
         const msg = e.reason || e.message;
         if(msg.includes("Overheat")) return res.status(429).json({error: "System Overheat"});
         res.status(500).json({ error: msg });
     }
 });
 
-// 2. PROFILE
-app.get('/profile/:address', async (req, res) => {
+// 2. SALVAGE
+app.post('/salvage', async (req, res) => {
     try {
-        const stats = await gameContract.getPlayerStats(req.params.address);
-        let balance = "0.0";
-        if (tokenContract) {
-            const raw = await tokenContract.balanceOf(req.params.address);
-            balance = parseFloat(ethers.formatEther(raw)).toFixed(1);
-        }
-        upsertUser(req.params.address, balance);
-
-        const gpuId = stats[2].toString();
-        const vpnId = stats[3].toString();
-        let gpuName = "None", vpnName = "None";
+        const { userAddress, signature, tokenId, amount } = req.body;
+        if (ethers.verifyMessage("SALVAGE_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
         
-        if (gpuId !== "0") {
-            const l = await gameContract.getItemLevel(req.params.address, gpuId);
-            gpuName = `${getMeta(gpuId).name} (+${l})`;
-        }
-        if (vpnId !== "0") {
-            const l = await gameContract.getItemLevel(req.params.address, vpnId);
-            vpnName = `${getMeta(vpnId).name} (+${l})`;
+        try { await gameContract.salvageArtifact.staticCall(userAddress, tokenId, amount); } 
+        catch (e: any) { 
+            const m = e.reason || ""; 
+            if(m.includes("Not enough")) return res.status(400).json({error: "Not enough items"}); 
+            if(m.includes("Only artifacts")) return res.status(400).json({error: "Cannot salvage Equipment"}); 
         }
 
-        res.json({
-            address: req.params.address,
-            balance,
-            stats: { cooldown: Number(stats[0]), luck: Number(stats[1]), buffTime: Number(stats[4]) },
-            rig: { gpu: gpuName, vpn: vpnName }
-        });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+        const tx = await gameContract.salvageArtifact(userAddress, tokenId, amount, { gasLimit: 200000 });
+        await tx.wait();
+        trackMission(userAddress, "SALVAGE_COUNT", Number(amount));
+        res.json({ success: true, message: "Salvage Complete" });
+    } catch (e:any) { res.status(500).json({error: e.message}); }
 });
 
-// 3. STAKING (Server Room)
+// 3. SHOP (BUY) - Using generic buyShopItem
+app.post('/shop/buy', async (req, res) => {
+    try {
+        const { userAddress, signature, itemId } = req.body;
+        if (ethers.verifyMessage("BUY_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
+        
+        const tx = await gameContract.buyShopItem(userAddress, itemId, { gasLimit: 200000 });
+        await tx.wait();
+        trackMission(userAddress, "SPEND_HASH", 100); // Estimate
+        res.json({ success: true, message: "Purchase Successful" });
+    } catch (e:any) { res.status(500).json({error: e.message}); }
+});
+
+// 4. ENCHANT
+app.post('/workshop/enchant', async (req, res) => {
+    try {
+        const { userAddress, signature, targetId, materialId } = req.body;
+        if (ethers.verifyMessage("ENCHANT_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
+
+        const tx = await gameContract.enchantItem(userAddress, targetId, materialId, { gasLimit: 500000 });
+        const receipt = await tx.wait();
+        trackMission(userAddress, "ENCHANT_ATTEMPT", 1);
+
+        let s=false, l=0;
+        for(const log of receipt.logs) {
+            try { const p = gameContract.interface.parseLog(log); if(p && p.name==='EnchantResult'){l=Number(p.args[2]); s=p.args[3];} } catch(e){}
+        }
+        res.json({ success: s, level: l, message: s ? "Upgrade OK" : "Chip Burned" });
+    } catch (e:any) { res.status(500).json({error: e.message}); }
+});
+
+// 5. EQUIP & USE
+app.post('/equip', async (req, res) => {
+    const { userAddress, signature, itemId } = req.body;
+    if (ethers.verifyMessage("EQUIP_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
+    try {
+        const tx = await gameContract.equipItem(userAddress, itemId, { gasLimit: 200000 });
+        await tx.wait();
+        res.json({ success: true });
+    } catch(e:any) { res.status(500).json({error:e.message}); }
+});
+
+app.post('/use', async (req, res) => {
+    const { userAddress, signature, itemId } = req.body;
+    if (ethers.verifyMessage("USE_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
+    try {
+        const tx = await gameContract.useConsumable(userAddress, itemId, { gasLimit: 200000 });
+        await tx.wait();
+        if(itemId == "501") trackMission(userAddress, "USE_THERMAL", 1);
+        if(itemId == "502") trackMission(userAddress, "OPEN_CRATE", 1);
+        res.json({ success: true, message: "Item Used" });
+    } catch(e:any) { res.status(500).json({error:e.message}); }
+});
+
+// 6. STAKING
 app.get('/rig/status/:address', async (req, res) => {
     try {
-        const addr = req.params.address;
-        const stakeableIds = [101,102,103,104, 201,202,203,204,205];
+        const addr = normalize(req.params.address);
+        const stakeableIds = [8, 101,102,103,104, 201,202,203,204,205]; // Added ID 8 (Genesis)
         const data = [];
-        
         for (const id of stakeableIds) {
             const amount = await gameContract.getStakedAmount(addr, id);
             if (amount > 0) {
                 const pending = await gameContract.getPendingReward(addr, id);
                 const meta = getMeta(id.toString());
-                data.push({
-                    id: id,
-                    name: meta.name,
-                    yieldRate: meta.yield,
-                    staked: Number(amount),
-                    pending: parseFloat(ethers.formatEther(pending)).toFixed(2)
-                });
+                data.push({ id, name: meta.name, yieldRate: meta.yield, staked: Number(amount), pending: parseFloat(ethers.formatEther(pending)).toFixed(2) });
             }
         }
         res.json({ stakes: data });
@@ -265,63 +286,79 @@ app.get('/rig/status/:address', async (req, res) => {
 });
 
 app.post('/rig/stake', async (req, res) => {
+    const { userAddress, signature, itemId, amount } = req.body;
+    if (ethers.verifyMessage("STAKE_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
     try {
-        const { userAddress, signature, itemId, amount } = req.body;
-        if (ethers.verifyMessage("STAKE_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth Failed" });
-        
         const tx = await gameContract.stakeItem(userAddress, itemId, amount, { gasLimit: 500000 });
         await tx.wait();
-        
         trackMission(userAddress, "STAKE_ITEM", 1);
         res.json({ success: true, message: "Hardware Installed" });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch(e:any) { res.status(500).json({error:e.message}); }
 });
 
 app.post('/rig/unstake', async (req, res) => {
+    const { userAddress, signature, itemId, amount } = req.body;
+    if (ethers.verifyMessage("UNSTAKE_ACTION", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
     try {
-        const { userAddress, signature, itemId, amount } = req.body;
-        if (ethers.verifyMessage("UNSTAKE_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth Failed" });
         const tx = await gameContract.unstakeItem(userAddress, itemId, amount, { gasLimit: 500000 });
         await tx.wait();
         res.json({ success: true, message: "Hardware Removed" });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch(e:any) { res.status(500).json({error:e.message}); }
 });
 
 app.post('/rig/claim', async (req, res) => {
+    const { userAddress, signature, itemId } = req.body;
+    if (ethers.verifyMessage("CLAIM_YIELD", signature).toLowerCase() !== normalize(userAddress)) return res.status(401).json({ error: "Auth" });
     try {
-        const { userAddress, signature, itemId } = req.body;
-        if (ethers.verifyMessage("CLAIM_YIELD", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth Failed" });
         const tx = await gameContract.claimItemReward(userAddress, itemId, { gasLimit: 500000 });
         await tx.wait();
         trackMission(userAddress, "CLAIM_YIELD", 1);
         res.json({ success: true, message: "Yield Collected" });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
+    } catch(e:any) { res.status(500).json({error:e.message}); }
 });
 
-// 4. WORKSHOP (Enchant)
-app.post('/workshop/enchant', async (req, res) => {
+// 7. READ DATA
+app.get('/inventory/:address', async (req, res) => {
+    const ids = [1,2,3,4,5,6,7,8, 99, 101,102,103,104, 201,202,203,204,205, 301,302,303, 401,402,499, 501,502];
+    const accounts = Array(ids.length).fill(req.params.address);
     try {
-        const { userAddress, signature, targetId, materialId } = req.body;
-        if (ethers.verifyMessage("ENCHANT_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth" });
-
-        const tx = await gameContract.enchantItem(userAddress, targetId, materialId, { gasLimit: 500000 });
-        const receipt = await tx.wait();
-        trackMission(userAddress, "ENCHANT_ATTEMPT", 1);
-
-        let success = false, lvl = 0;
-        for (const log of receipt.logs) {
-            try {
-                const p = gameContract.interface.parseLog(log);
-                if(p && p.name === 'EnchantResult') { lvl = Number(p.args[2]); success = p.args[3]; }
-            } catch(e){}
-        }
-        res.json({ success, level: lvl, message: success ? "Success!" : "Failed (Chip Lost)" });
+        const bals = await gameContract.balanceOfBatch(accounts, ids);
+        const items = ids.map((id, i) => {
+            const qty = Number(bals[i]);
+            if (qty > 0) return { id, ...getMeta(id.toString()), qty };
+            return null;
+        }).filter(x => x);
+        res.json({ items });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
-// 5. MISSIONS
+app.get('/profile/:address', async (req, res) => {
+    try {
+        const safeAddr = normalize(req.params.address);
+        const stats = await gameContract.getPlayerStats(safeAddr);
+        let balance = "0.0";
+        if (tokenContract) {
+            const raw = await tokenContract.balanceOf(safeAddr);
+            balance = parseFloat(ethers.formatEther(raw)).toFixed(1);
+        }
+        upsertUser(safeAddr, balance);
+
+        const gpuId = stats[2].toString();
+        const vpnId = stats[3].toString();
+        let gpuName = "None", vpnName = "None";
+        if (gpuId !== "0") { const l = await gameContract.getItemLevel(safeAddr, gpuId); gpuName = `${getMeta(gpuId).name} (+${l})`; }
+        if (vpnId !== "0") { const l = await gameContract.getItemLevel(safeAddr, vpnId); vpnName = `${getMeta(vpnId).name} (+${l})`; }
+
+        res.json({
+            address: safeAddr, balance,
+            stats: { cooldown: Number(stats[0]), luck: Number(stats[1]), buffTime: Number(stats[4]) },
+            rig: { gpu: gpuName, vpn: vpnName }
+        });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/contracts/:address', (req, res) => {
-    const addr = req.params.address;
+    const addr = normalize(req.params.address);
     const today = new Date().toISOString().split('T')[0];
     db.all(`SELECT * FROM missions WHERE address=? AND date=?`, [addr, today], (e, rows) => {
         if (!rows || rows.length === 0) {
@@ -341,10 +378,9 @@ function formatMissions(rows: any[]) {
             else if(type.includes("SALVAGE")) desc=`Salvage ${target} items`;
             else if(type.includes("SPEND")) desc=`Spend ${target} $HASH`;
             else if(type.includes("ENCHANT")) desc=`Overclock ${target}x`;
-            else if(type.includes("STAKE")) desc=`Install Hardware to Server`;
-            else if(type.includes("CLAIM")) desc=`Claim Passive Income`;
-            else if(type.includes("FIND")) desc=`Find Specific Item`;
-            else if(type.includes("USE")) desc=`Use Consumable`;
+            else if(type.includes("STAKE")) desc=`Install Hardware`;
+            else if(type.includes("CLAIM")) desc=`Claim Yield`;
+            
             return { id: r.id, desc, progress: r.progress, target: Number(target), reward: `${reward} $HASH`, claimed: r.claimed === 1 };
         })
     };
@@ -352,9 +388,9 @@ function formatMissions(rows: any[]) {
 
 app.post('/contracts/claim', async (req, res) => {
     const { userAddress, signature, missionId } = req.body;
-    // Verify Sig (Simplified)
+    const safeAddr = normalize(userAddress);
     db.get(`SELECT * FROM missions WHERE id=?`, [missionId], async (e, row: any) => {
-        if (!row || row.address !== userAddress || row.progress < row.target || row.claimed === 1) return res.status(400).json({ error: "Invalid Claim" });
+        if (!row || row.address !== safeAddr || row.progress < row.target || row.claimed === 1) return res.status(400).json({ error: "Invalid" });
         const [,, reward] = row.mission_key.split(':');
         const tx = await gameContract.adminRewardHash(userAddress, ethers.parseEther(reward), { gasLimit: 500000 });
         await tx.wait();
@@ -363,62 +399,8 @@ app.post('/contracts/claim', async (req, res) => {
     });
 });
 
-// 6. GENERAL ACTIONS
-app.post('/salvage', async (req, res) => {
-    try {
-        const { userAddress, signature, tokenId, amount } = req.body;
-        if (ethers.verifyMessage("SALVAGE_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth" });
-        const tx = await gameContract.salvageArtifact(userAddress, tokenId, amount, { gasLimit: 200000 });
-        await tx.wait();
-        trackMission(userAddress, "SALVAGE_COUNT", amount);
-        res.json({ success: true, message: "Salvage Complete" });
-    } catch (e:any) { res.status(500).json({error: e.message}); }
-});
-
-app.post('/shop/software', async (req, res) => {
-    try {
-        const { userAddress, signature, itemId } = req.body;
-        if (ethers.verifyMessage("BUY_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth" });
-        const tx = await gameContract.buySoftware(userAddress, itemId, { gasLimit: 200000 });
-        await tx.wait();
-        trackMission(userAddress, "SPEND_HASH", 100);
-        res.json({ success: true });
-    } catch (e:any) { res.status(500).json({error: e.message}); }
-});
-
-app.post('/equip', async (req, res) => {
-    const { userAddress, signature, itemId } = req.body;
-    if (ethers.verifyMessage("EQUIP_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth" });
-    const tx = await gameContract.equipItem(userAddress, itemId, { gasLimit: 200000 });
-    await tx.wait();
-    res.json({ success: true });
-});
-
-app.post('/use', async (req, res) => {
-    const { userAddress, signature, itemId } = req.body;
-    if (ethers.verifyMessage("USE_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Auth" });
-    const tx = await gameContract.useConsumable(userAddress, itemId, { gasLimit: 200000 });
-    await tx.wait();
-    if(itemId == "501") trackMission(userAddress, "USE_THERMAL", 1);
-    res.json({ success: true, message: "Item Used" });
-});
-
 app.get('/leaderboard', (req, res) => {
     db.all(`SELECT address, hash_balance FROM users ORDER BY hash_balance DESC LIMIT 10`, (err, rows) => res.json({ top10: rows }));
 });
 
-app.get('/inventory/:address', async (req, res) => {
-    const ids = [1,2,3,4,5,6,7,8, 99, 101,102,103,104, 201,202,203,204,205, 301,302,303, 401,402,499, 501,502];
-    const accounts = Array(ids.length).fill(req.params.address);
-    try {
-        const bals = await gameContract.balanceOfBatch(accounts, ids);
-        const items = ids.map((id, i) => {
-            const qty = Number(bals[i]);
-            if (qty > 0) return { id, ...getMeta(id.toString()), qty };
-            return null;
-        }).filter(x => x);
-        res.json({ items });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-});
-
-app.listen(PORT, () => console.log(`🚀 CyberRNG v7.1 (Stable) running on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 CyberRNG v8.1 (Hardcore Balanced) running on ${PORT}`));

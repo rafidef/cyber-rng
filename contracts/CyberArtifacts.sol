@@ -14,32 +14,30 @@ contract HashToken is ERC20, Ownable {
 
 contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
     HashToken public hashToken;
-    uint256 public constant BASE_COOLDOWN = 30; 
+    
+    // --- BALANCING CONFIG (HARDCORE) ---
+    uint256 public constant BASE_COOLDOWN = 40; // Slower Base
+    uint256 public constant MIN_COOLDOWN = 10;  // Speed Cap
+    uint256 public constant MAX_BUFF_DURATION = 24 hours; // Hoarding Cap
 
     struct ItemStats {
-        uint8 itemType;   // 1=Art, 2=GPU, 3=VPN, 4=Soft, 5=Mat, 6=Cons
+        uint8 itemType;   
         uint256 statVal;  
         uint256 price;
-        uint256 stakingYield; // NEW: $HASH generated per second
+        uint256 stakingYield;
     }
     
     mapping(uint256 => ItemStats) public itemRegistry;
     
     struct PlayerRig { uint256 equippedGPU; uint256 equippedVPN; }
     struct ActiveBuff { uint256 activeUntil; uint256 statVal; }
-    
-    // --- STAKING DATA ---
-    struct StakeInfo {
-        uint256 amount;
-        uint256 lastClaimTime;
-    }
-    // User -> ItemID -> Stake Info
-    mapping(address => mapping(uint256 => StakeInfo)) public userStakes;
-    
+    struct StakeInfo { uint256 amount; uint256 lastClaimTime; }
+
     mapping(address => PlayerRig) public playerRigs;
     mapping(address => ActiveBuff) public softwareBuff;
     mapping(address => uint256) public lastMined;
     mapping(address => mapping(uint256 => uint256)) public itemLevels;
+    mapping(address => mapping(uint256 => StakeInfo)) public userStakes;
 
     event MiningResult(address indexed user, uint256 tokenId, uint256 rng, bool isSpecial);
     event EnchantResult(address indexed user, uint256 itemId, uint256 newLevel, bool success);
@@ -53,9 +51,7 @@ contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
     }
 
     function _setupRegistry() internal {
-        // Yield Rate: 0.1 ether = 0.1 $HASH per detik
-        
-        // 1. ARTIFACTS (No Staking)
+        // 1. ARTIFACTS
         itemRegistry[1] = ItemStats(1, 10 ether, 0, 0);
         itemRegistry[2] = ItemStats(1, 25 ether, 0, 0);
         itemRegistry[3] = ItemStats(1, 50 ether, 0, 0);
@@ -63,121 +59,53 @@ contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
         itemRegistry[5] = ItemStats(1, 250 ether, 0, 0);
         itemRegistry[6] = ItemStats(1, 1000 ether, 0, 0);
         itemRegistry[7] = ItemStats(1, 5000 ether, 0, 0);
-        itemRegistry[8] = ItemStats(1, 25000 ether, 0, 10 ether); // Mythic bisa di stake (10/s)
+        // Nerfed Mythic Yield (10 -> 1)
+        itemRegistry[8] = ItemStats(1, 25000 ether, 0, 1 ether); 
 
-        // 2. GPU (High Passive Income)
-        itemRegistry[101] = ItemStats(2, 2, 0, 0.1 ether); 
-        itemRegistry[102] = ItemStats(2, 5, 0, 0.5 ether);  
-        itemRegistry[103] = ItemStats(2, 10, 0, 2 ether); 
-        itemRegistry[104] = ItemStats(2, 15, 0, 10 ether); 
+        // 2. GPU (Speed) - Nerfed Yields
+        itemRegistry[101] = ItemStats(2, 2, 0, 0.01 ether); 
+        itemRegistry[102] = ItemStats(2, 5, 0, 0.05 ether);  
+        itemRegistry[103] = ItemStats(2, 10, 0, 0.2 ether); 
+        itemRegistry[104] = ItemStats(2, 15, 0, 1 ether); 
 
-        // 3. VPN (Medium Passive Income)
-        itemRegistry[201] = ItemStats(3, 100, 0, 0.05 ether);
-        itemRegistry[202] = ItemStats(3, 500, 0, 0.2 ether);
-        itemRegistry[203] = ItemStats(3, 1500, 0, 0.8 ether);
-        itemRegistry[204] = ItemStats(3, 3000, 0, 4 ether);
-        itemRegistry[205] = ItemStats(3, 8000, 0, 20 ether);
+        // 3. VPN (Luck) - Nerfed Yields
+        itemRegistry[201] = ItemStats(3, 100, 0, 0.01 ether);
+        itemRegistry[202] = ItemStats(3, 500, 0, 0.05 ether);
+        itemRegistry[203] = ItemStats(3, 1500, 0, 0.2 ether);
+        itemRegistry[204] = ItemStats(3, 3000, 0, 0.8 ether);
+        itemRegistry[205] = ItemStats(3, 8000, 0, 2.5 ether);
 
-        // 4. SOFTWARE & MATS (No Staking)
-        itemRegistry[301] = ItemStats(4, 1000, 100 ether, 0);
-        itemRegistry[302] = ItemStats(4, 5000, 500 ether, 0);
-        itemRegistry[303] = ItemStats(4, 20000, 2000 ether, 0);
+        // 4. SOFTWARE (Buffs) - NERFED STATS
+        itemRegistry[301] = ItemStats(4, 300, 100 ether, 0);   // 300 Luck
+        itemRegistry[302] = ItemStats(4, 1000, 500 ether, 0);  // 1000 Luck
+        itemRegistry[303] = ItemStats(4, 2500, 2000 ether, 0); // 2500 Luck
+
+        // 5. MATERIALS
         itemRegistry[401] = ItemStats(5, 0, 50 ether, 0);  
         itemRegistry[402] = ItemStats(5, 0, 200 ether, 0); 
         itemRegistry[499] = ItemStats(5, 0, 0, 0);         
+
+        // 6. CONSUMABLES
         itemRegistry[501] = ItemStats(6, 0, 150 ether, 0); 
         itemRegistry[502] = ItemStats(6, 0, 500 ether, 0); 
     }
 
-    // --- STAKING SYSTEM ---
-    function stakeItem(address user, uint256 itemId, uint256 amount) external onlyOwner {
-        require(balanceOf(user, itemId) >= amount, "Not enough items");
-        require(itemRegistry[itemId].stakingYield > 0, "Not stakeable");
-        
-        // 1. Claim pending rewards first
-        _claimReward(user, itemId);
-
-        // 2. Take Item (Burn temporary)
-        _burn(user, itemId, amount);
-
-        // 3. Update Data
-        userStakes[user][itemId].amount += amount;
-        userStakes[user][itemId].lastClaimTime = block.timestamp;
-        
-        emit StakingUpdate(user, itemId, userStakes[user][itemId].amount, true);
-    }
-
-    function unstakeItem(address user, uint256 itemId, uint256 amount) external onlyOwner {
-        require(userStakes[user][itemId].amount >= amount, "Not enough staked");
-        
-        // 1. Claim pending rewards first
-        _claimReward(user, itemId);
-
-        // 2. Update Data
-        userStakes[user][itemId].amount -= amount;
-        userStakes[user][itemId].lastClaimTime = block.timestamp;
-
-        // 3. Return Item
-        _mint(user, itemId, amount, "");
-        
-        emit StakingUpdate(user, itemId, userStakes[user][itemId].amount, false);
-    }
-
-    function claimRewards(address user) external onlyOwner {
-        // Loop manual di backend atau claim per item ID?
-        // Agar hemat gas, kita biarkan backend panggil per item atau user claim all via backend loop
-        // Di sini kita buat fungsi helper internal saja
-    }
-
-    function claimItemReward(address user, uint256 itemId) external onlyOwner {
-        _claimReward(user, itemId);
-    }
-
-    function _claimReward(address user, uint256 itemId) internal {
-        StakeInfo storage info = userStakes[user][itemId];
-        if (info.amount > 0) {
-            uint256 secondsElapsed = block.timestamp - info.lastClaimTime;
-            uint256 rate = itemRegistry[itemId].stakingYield;
-            
-            // Reward = seconds * rate * amount
-            uint256 reward = secondsElapsed * rate * info.amount;
-            
-            if (reward > 0) {
-                hashToken.mint(user, reward);
-                emit RewardClaimed(user, reward);
-            }
-            info.lastClaimTime = block.timestamp;
-        } else {
-            // Jika baru pertama kali stake, set timer
-            info.lastClaimTime = block.timestamp;
-        }
-    }
-
-    function getPendingReward(address user, uint256 itemId) public view returns (uint256) {
-        StakeInfo memory info = userStakes[user][itemId];
-        if (info.amount == 0) return 0;
-        uint256 secondsElapsed = block.timestamp - info.lastClaimTime;
-        return secondsElapsed * itemRegistry[itemId].stakingYield * info.amount;
-    }
-    
-    function getStakedAmount(address user, uint256 itemId) public view returns (uint256) {
-        return userStakes[user][itemId].amount;
-    }
-
-    // --- MINING SYSTEM (Sama seperti v6) ---
+    // --- MINING (NO PITY) ---
     function mineArtifact(address user) external onlyOwner {
+        // 1. Cooldown
         uint256 cooldownTime = BASE_COOLDOWN;
         uint256 gpuId = playerRigs[user].equippedGPU;
         if (gpuId != 0) {
             uint256 reduction = itemRegistry[gpuId].statVal;
             uint256 lvl = itemLevels[user][gpuId];
             uint256 totalRed = reduction + lvl; 
-            if (totalRed >= cooldownTime) cooldownTime = 5; 
+            if (totalRed >= (BASE_COOLDOWN - MIN_COOLDOWN)) cooldownTime = MIN_COOLDOWN; 
             else cooldownTime -= totalRed;
         }
         require(block.timestamp >= lastMined[user] + cooldownTime, "Overheat");
         lastMined[user] = block.timestamp;
 
+        // 2. Luck
         uint256 totalLuck = 0;
         uint256 vpnId = playerRigs[user].equippedVPN;
         if (vpnId != 0) {
@@ -187,21 +115,30 @@ contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
         }
         if (softwareBuff[user].activeUntil > block.timestamp) totalLuck += softwareBuff[user].statVal;
 
+        // 3. RNG
         uint256 rng = uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, user))) % 100000;
         uint256 droppedId;
         bool isSpecial = false;
 
+        // Special Drop
         if (rng < (3000 + (totalLuck / 5))) { 
             isSpecial = true;
-            uint256 subRng = uint256(keccak256(abi.encodePacked(rng, user))) % 100;
-            if (subRng < 30) droppedId = 401; 
-            else if (subRng < 50) droppedId = 101; 
-            else if (subRng < 70) droppedId = 201; 
-            else if (subRng < 80) droppedId = 102; 
-            else if (subRng < 90) droppedId = 202; 
-            else if (subRng < 95) droppedId = 402; 
+            uint256 subRng = uint256(keccak256(abi.encodePacked(rng, user))) % 1000;
+            if (subRng < 300) droppedId = 401; 
+            else if (subRng < 450) droppedId = 101; 
+            else if (subRng < 600) droppedId = 201; 
+            else if (subRng < 700) droppedId = 102; 
+            else if (subRng < 800) droppedId = 202; 
+            else if (subRng < 850) droppedId = 402; 
+            else if (subRng < 890) droppedId = 103; 
+            else if (subRng < 930) droppedId = 203; 
+            else if (subRng < 960) droppedId = 104; 
+            else if (subRng < 990) droppedId = 204; 
+            else if (subRng < 995) droppedId = 205; 
             else droppedId = 499; 
-        } else {
+        } 
+        else {
+            // Artifact Drop (Hardcore: No Pity)
             if (rng < 50 + totalLuck) droppedId = 8;       
             else if (rng < 250 + totalLuck) droppedId = 7; 
             else if (rng < 1000 + totalLuck) droppedId = 6;
@@ -215,7 +152,30 @@ contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
         emit MiningResult(user, droppedId, rng, isSpecial);
     }
 
-    // --- UTILS (Sama seperti v6) ---
+    // --- SHOP (WITH DURATION CAP) ---
+    function buyShopItem(address user, uint256 itemId) external onlyOwner {
+        ItemStats memory stats = itemRegistry[itemId];
+        require(stats.itemType == 4 || stats.itemType == 6, "Not sold");
+        require(stats.price > 0, "No price");
+        hashToken.burnByGame(user, stats.price);
+
+        if (stats.itemType == 4) {
+            // Buff Logic with Cap
+            ActiveBuff storage current = softwareBuff[user];
+            if (current.activeUntil > block.timestamp && current.statVal == stats.statVal) {
+                uint256 newTime = current.activeUntil + 1 hours;
+                if (newTime > block.timestamp + MAX_BUFF_DURATION) newTime = block.timestamp + MAX_BUFF_DURATION;
+                current.activeUntil = newTime;
+            } else {
+                softwareBuff[user] = ActiveBuff(block.timestamp + 1 hours, stats.statVal);
+            }
+        } else {
+            _mint(user, itemId, 1, "");
+        }
+    }
+
+    // ... (Rest of functions: enchant, use, stake, unstake, etc. SAME AS v7.0) ...
+    // COPY PASTE THE REST FROM PREVIOUS VERSION
     function enchantItem(address user, uint256 targetItemId, uint256 materialId) external onlyOwner {
         require(balanceOf(user, targetItemId) > 0, "No target");
         require(balanceOf(user, materialId) > 0, "No material");
@@ -246,6 +206,41 @@ contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
             emit ItemUsed(user, itemId, "CRATE_OPEN");
         }
     }
+    function stakeItem(address user, uint256 itemId, uint256 amount) external onlyOwner {
+        require(balanceOf(user, itemId) >= amount, "Not enough items");
+        require(itemRegistry[itemId].stakingYield > 0, "Not stakeable");
+        _claimReward(user, itemId);
+        _burn(user, itemId, amount);
+        userStakes[user][itemId].amount += amount;
+        userStakes[user][itemId].lastClaimTime = block.timestamp;
+        emit StakingUpdate(user, itemId, userStakes[user][itemId].amount, true);
+    }
+    function unstakeItem(address user, uint256 itemId, uint256 amount) external onlyOwner {
+        require(userStakes[user][itemId].amount >= amount, "Not enough staked");
+        _claimReward(user, itemId);
+        userStakes[user][itemId].amount -= amount;
+        userStakes[user][itemId].lastClaimTime = block.timestamp;
+        _mint(user, itemId, amount, "");
+        emit StakingUpdate(user, itemId, userStakes[user][itemId].amount, false);
+    }
+    function claimItemReward(address user, uint256 itemId) external onlyOwner { _claimReward(user, itemId); }
+    function _claimReward(address user, uint256 itemId) internal {
+        StakeInfo storage info = userStakes[user][itemId];
+        if (info.amount > 0) {
+            uint256 secondsElapsed = block.timestamp - info.lastClaimTime;
+            uint256 rate = itemRegistry[itemId].stakingYield;
+            uint256 reward = secondsElapsed * rate * info.amount;
+            if (reward > 0) { hashToken.mint(user, reward); emit RewardClaimed(user, reward); }
+            info.lastClaimTime = block.timestamp;
+        } else { info.lastClaimTime = block.timestamp; }
+    }
+    function getPendingReward(address user, uint256 itemId) public view returns (uint256) {
+        StakeInfo memory info = userStakes[user][itemId];
+        if (info.amount == 0) return 0;
+        uint256 secondsElapsed = block.timestamp - info.lastClaimTime;
+        return secondsElapsed * itemRegistry[itemId].stakingYield * info.amount;
+    }
+    function getStakedAmount(address user, uint256 itemId) public view returns (uint256) { return userStakes[user][itemId].amount; }
     function adminRewardHash(address to, uint256 amount) external onlyOwner { hashToken.mint(to, amount); }
     function adminMint(address to, uint256 itemId, uint256 amount) external onlyOwner { _mint(to, itemId, amount, ""); }
     function equipItem(address user, uint256 itemId) external onlyOwner {
@@ -254,12 +249,6 @@ contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
         if (stats.itemType == 2) playerRigs[user].equippedGPU = itemId;
         else if (stats.itemType == 3) playerRigs[user].equippedVPN = itemId;
         else revert("Not equippable");
-    }
-    function buySoftware(address user, uint256 itemId) external onlyOwner {
-        ItemStats memory stats = itemRegistry[itemId];
-        require(stats.itemType == 4, "Not software");
-        hashToken.burnByGame(user, stats.price);
-        softwareBuff[user] = ActiveBuff(block.timestamp + 1 hours, stats.statVal);
     }
     function salvageArtifact(address user, uint256 tokenId, uint256 amount) external onlyOwner {
         ItemStats memory stats = itemRegistry[tokenId];
@@ -275,7 +264,7 @@ contract CyberArtifacts is ERC1155, ERC1155Burnable, Ownable {
             uint256 reduction = itemRegistry[gpu].statVal;
             uint256 lvl = itemLevels[user][gpu];
             uint256 totalRed = reduction + lvl;
-            if (totalRed >= cooldown) cooldown = 5; else cooldown -= totalRed;
+            if (totalRed >= (BASE_COOLDOWN - MIN_COOLDOWN)) cooldown = MIN_COOLDOWN; else cooldown -= totalRed;
         }
         uint256 luck = 0;
         uint256 vpn = playerRigs[user].equippedVPN;
