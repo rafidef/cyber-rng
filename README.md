@@ -2,13 +2,12 @@
 ### _Decentralized Backend for the CyberRNG Network_
 
 ```txt
-   _____      _                ____  _   _  ____    ____  _   _   ____               
-  / ____|    | |              |  _ \| \ | |/ __ \  / __ \| \ | | / __ \              
- | |     __ _| |__   ___ _ __ | |_) |  \| | |  | || |  | |  \| || |  | |  _ __   ___ 
- | |    / _` | '_ \ / _ \ '_ \|  _ <| . ` | |  | || |  | | . ` || |  | | | '_ \ / _ \
- | |___| (_| | |_) |  __/ | | | |_) | |\  | |__| || |__| | |\  || |__| | | | | |  __/
-  \_____\__,_|_.__/ \___|_| |_|____/|_| \_|\____/  \____/|_| \_| \____/  |_| |_|\___|
-      CYBER RNG CORE · TERMINAL MINING RPG · POLYGON AMOY · GASLESS META-TX
+  ______   ______  _____ ____    ____  _   _  ____    ____ ___  ____  _____ 
+ / ___\ \ / / __ )| ____|  _ \  |  _ \| \ | |/ ___|  / ___/ _ \|  _ \| ____|
+| |    \ V /|  _ \|  _| | |_) | | |_) |  \| | |  _  | |  | | | | |_) |  _|  
+| |___  | | | |_) | |___|  _ <  |  _ <| |\  | |_| | | |__| |_| |  _ <| |___ 
+ \____| |_| |____/|_____|_| \_\ |_| \_\_| \_|\____|  \____\___/|_| \_\_____|
+   CYBER RNG CORE · TERMINAL MINING RPG · POLYGON AMOY · GASLESS META-TX
 ```
 
 <div align="center">
@@ -195,13 +194,12 @@ Copy deployed contract address → `.env`.
 ## 📊 Architecture Diagram
 
 ```mermaid
-graph TD
-    S[Player CLI] -->|Signs Message| A
-    A[Relayer Backend] -->|Verify Sig| B
-    B -->|Call Admin Wallet| C[Polygon Amoy RPC]
-    C --> D[(Smart Contract)]
-    D --> E[(SQLite)]
-    E --> S
+flowchart TD
+    A["📝 Player signs message<br/>(EIP-191)"] --> B["🔍 Signature & Intent Verification"]
+    B --> C["⚙️ Construct Meta-Transaction"]
+    C --> D["🚀 Admin Wallet Executes TX<br/>Polygon Amoy"]
+    D --> E["🗄 SQLite: Missions + Leaderboard"]
+    E --> F["📡 Client Receives Updated State"]
 ```
 
 ---
