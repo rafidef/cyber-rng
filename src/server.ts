@@ -103,7 +103,9 @@ app.post('/mine', async (req, res) => {
         const { userAddress, signature } = req.body;
         if (ethers.verifyMessage("MINT_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
         
-        const tx = await gameContract.mineArtifact(userAddress);
+        const tx = await gameContract.mineArtifact(userAddress, { 
+            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
+        });
         const receipt = await tx.wait();
         
         let result = null;
@@ -129,7 +131,9 @@ app.post('/workshop/enchant', async (req, res) => {
         if (ethers.verifyMessage("ENCHANT_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
 
         console.log(`⚡ Enchanting Item #${targetId} for ${userAddress}`);
-        const tx = await gameContract.enchantItem(userAddress, targetId, materialId);
+        const tx = await gameContract.enchantItem(userAddress, targetId, materialId, { 
+            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
+        });
         const receipt = await tx.wait();
         
         let success = false, newLevel = 0;
@@ -150,7 +154,9 @@ app.post('/equip', async (req, res) => {
     try {
         const { userAddress, signature, itemId } = req.body;
         if (ethers.verifyMessage("EQUIP_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
-        const tx = await gameContract.equipItem(userAddress, itemId);
+        const tx = await gameContract.equipItem(userAddress, itemId, { 
+            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
+        });
         await tx.wait();
         res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -160,7 +166,9 @@ app.post('/shop/software', async (req, res) => {
     try {
         const { userAddress, signature, itemId } = req.body;
         if (ethers.verifyMessage("BUY_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
-        const tx = await gameContract.buySoftware(userAddress, itemId);
+        const tx = await gameContract.buySoftware(userAddress, itemId, { 
+        gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
+        });
         await tx.wait();
         res.json({ success: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -170,7 +178,9 @@ app.post('/salvage', async (req, res) => {
     try {
         const { userAddress, signature, tokenId, amount } = req.body;
         if (ethers.verifyMessage("SALVAGE_ACTION", signature).toLowerCase() !== userAddress.toLowerCase()) return res.status(401).json({ error: "Invalid Sig" });
-        const tx = await gameContract.salvageArtifact(userAddress, tokenId, amount);
+        const tx = await gameContract.salvageArtifact(userAddress, tokenId, amount, { 
+            gasLimit: 500000 // Kita paksa gas limit tinggi biar aman
+        });
         await tx.wait();
         res.json({ success: true, message: "Salvage Complete" });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
