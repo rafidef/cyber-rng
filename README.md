@@ -36,7 +36,6 @@
 - [📍 Overview](#-overview)
 - [⚙️ Architecture](#️-architecture)
 - [📦 Features](#-features)
-- [🖥️ CLI Preview](#️-cli-preview)
 - [🚀 Installation & Setup](#-installation--setup)
 - [⛓️ Smart Contract Deployment](#️-smart-contract-deployment)
 - [📡 API Endpoints](#-api-endpoints)
